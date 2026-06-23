@@ -2,6 +2,8 @@
 
 Converts a SharePoint staff list Excel export into a Horilla employee import file.
 
+**Integration plans:** See [docs/](docs/README.md) for Active Directory and SharePoint API integration roadmaps.
+
 ## Files
 
 | File | Purpose |
