@@ -375,6 +375,8 @@ function Normalize-HorillaGender {
         default { return $text }
     }
 }
+
+function New-PlaceholderEmail {
     param(
         [string]$BadgeId,
         [string]$FirstName,
