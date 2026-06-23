@@ -7,8 +7,8 @@
     Reads a SharePoint list export (.xlsx), maps columns to Horilla work-info import fields,
     and writes a filled workbook that matches the Horilla template headers exactly.
 
-    Requires the ImportExcel module:
-        Install-Module ImportExcel -Scope CurrentUser
+    Requires the ImportExcel module. The script installs it automatically on
+    first run if it is missing.
 
 .PARAMETER SharePointExportPath
     Path to the SharePoint Excel export. When omitted, the script looks for
@@ -76,17 +76,49 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $Script:ScriptRoot 'sharepoint-horilla.config.json'
 }
 
-function Ensure-ImportExcelModule {
-    if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
-        throw @"
-The ImportExcel module is required.
+Set-Location -LiteralPath $Script:ScriptRoot
 
-Install it once with:
-    Install-Module ImportExcel -Scope CurrentUser
-"@
+function Ensure-ImportExcelModule {
+    if (Get-Module -ListAvailable -Name ImportExcel) {
+        Import-Module ImportExcel -ErrorAction Stop
+        return
     }
 
-    Import-Module ImportExcel -ErrorAction Stop
+    Write-Host 'ImportExcel module not found. Installing for current user (one-time setup)...'
+
+    try {
+        if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
+            Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser | Out-Null
+        }
+
+        $gallery = Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue
+        if ($gallery -and $gallery.InstallationPolicy -ne 'Trusted') {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        }
+
+        Install-Module ImportExcel -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        Import-Module ImportExcel -ErrorAction Stop
+        Write-Host 'ImportExcel installed successfully.'
+    }
+    catch {
+        throw @"
+The ImportExcel module is required and automatic installation failed.
+
+Run these commands manually in PowerShell, then try again:
+
+    Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+    Install-PackageProvider -Name NuGet -Force
+    Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+    Install-Module ImportExcel -Scope CurrentUser -Force
+
+Then run:
+
+    cd $Script:ScriptRoot
+    .\Convert-SharePointToHorilla.ps1
+
+Original error: $($_.Exception.Message)
+"@
+    }
 }
 
 function Resolve-InputPath {
