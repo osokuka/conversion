@@ -11,13 +11,16 @@
         Install-Module ImportExcel -Scope CurrentUser
 
 .PARAMETER SharePointExportPath
-    Path to the SharePoint Excel export.
+    Path to the SharePoint Excel export. When omitted, the script looks for
+    sharepoint_list.xlsx in the script folder or current directory.
 
 .PARAMETER TemplatePath
     Path to the empty Horilla import template downloaded from Horilla (Actions > Import).
+    Defaults to work_info_template.xlsx in the script folder or current directory.
 
 .PARAMETER OutputPath
-    Path for the generated Horilla import file.
+    Path for the generated Horilla import file. Defaults to horilla_import.xlsx
+    next to the script.
 
 .PARAMETER ConfigPath
     Optional JSON config for column mappings and default values.
@@ -26,27 +29,17 @@
     SharePoint worksheet name. When omitted, the first worksheet is used.
 
 .EXAMPLE
-    .\Convert-SharePointToHorilla.ps1 `
-        -SharePointExportPath .\sharepoint_list.xlsx `
-        -TemplatePath .\work_info_template.xlsx `
-        -OutputPath .\horilla_import.xlsx
+    .\Convert-SharePointToHorilla.ps1
 
 .EXAMPLE
-    .\Convert-SharePointToHorilla.ps1 `
-        -SharePointExportPath .\sharepoint_list.xlsx `
-        -TemplatePath .\work_info_template.xlsx `
-        -OutputPath .\horilla_import.xlsx `
-        -ConfigPath .\sharepoint-horilla.config.json
+    .\Convert-SharePointToHorilla.ps1 -ConfigPath .\sharepoint-horilla.config.json
 #>
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
     [string]$SharePointExportPath,
 
-    [Parameter(Mandatory = $true)]
     [string]$TemplatePath,
 
-    [Parameter(Mandatory = $true)]
     [string]$OutputPath,
 
     [string]$ConfigPath = (Join-Path $PSScriptRoot 'sharepoint-horilla.config.json'),
@@ -84,6 +77,73 @@ function Resolve-InputPath {
     }
 
     return $resolved.Path
+}
+
+function Find-NamedFile {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$FileName
+    )
+
+    $searchRoots = @(
+        $PSScriptRoot
+        (Get-Location).Path
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
+
+    foreach ($root in $searchRoots) {
+        $candidate = Join-Path $root $FileName
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+    }
+
+    foreach ($root in $searchRoots) {
+        if (-not (Test-Path -LiteralPath $root)) {
+            continue
+        }
+
+        $found = Get-ChildItem -LiteralPath $root -Filter $FileName -File -Recurse -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+        if ($found) {
+            return $found.FullName
+        }
+    }
+
+    throw "Could not find '$FileName'. Place it in the script folder or current directory."
+}
+
+function Resolve-DefaultPaths {
+    param(
+        [string]$SharePointExportPath,
+        [string]$TemplatePath,
+        [string]$OutputPath
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SharePointExportPath)) {
+        $SharePointExportPath = Find-NamedFile -FileName 'sharepoint_list.xlsx'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($TemplatePath)) {
+        $TemplatePath = Find-NamedFile -FileName 'work_info_template.xlsx'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($OutputPath)) {
+        $basePath = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+            $PSScriptRoot
+        }
+        else {
+            Split-Path -Parent $SharePointExportPath
+        }
+
+        $OutputPath = Join-Path $basePath 'horilla_import.xlsx'
+    }
+
+    return [pscustomobject]@{
+        SharePointExportPath = $SharePointExportPath
+        TemplatePath         = $TemplatePath
+        OutputPath           = $OutputPath
+    }
 }
 
 function Get-Config {
@@ -433,8 +493,14 @@ function Export-HorillaWorkbook {
 
 Ensure-ImportExcelModule
 
-$sharePointPath = Resolve-InputPath -Path $SharePointExportPath -Label 'SharePoint export'
-$templatePath = Resolve-InputPath -Path $TemplatePath -Label 'Horilla template'
+$resolvedPaths = Resolve-DefaultPaths `
+    -SharePointExportPath $SharePointExportPath `
+    -TemplatePath $TemplatePath `
+    -OutputPath $OutputPath
+
+$sharePointPath = Resolve-InputPath -Path $resolvedPaths.SharePointExportPath -Label 'SharePoint export'
+$templatePath = Resolve-InputPath -Path $resolvedPaths.TemplatePath -Label 'Horilla template'
+$OutputPath = $resolvedPaths.OutputPath
 $config = Get-Config -Path $ConfigPath
 $horillaHeaders = Get-HorillaHeaders -Path $templatePath
 
@@ -480,6 +546,7 @@ foreach ($importedRow in $importedRows) {
 Export-HorillaWorkbook -TemplatePath $templatePath -OutputPath $OutputPath -Rows $convertedRows -HorillaHeaders $horillaHeaders
 
 Write-Host "Conversion complete."
+Write-Host "  SharePoint file      : $sharePointPath"
 Write-Host "  SharePoint worksheet : $WorksheetName"
 Write-Host "  Rows converted       : $($convertedRows.Count)"
 Write-Host "  Rows skipped         : $skippedCount"
