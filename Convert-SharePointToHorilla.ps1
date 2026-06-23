@@ -95,6 +95,36 @@ function ConvertTo-ObjectArray {
         return @()
     }
 
+    if ($Value -is [string]) {
+        return @($Value)
+    }
+
+  # @($list) throws "Argument types do not match" under Set-StrictMode -Version Latest
+    if ($Value -is [System.Collections.Generic.List[object]]) {
+        if ($Value.Count -eq 0) {
+            return @()
+        }
+
+        return $Value.ToArray()
+    }
+
+    if ($Value -is [System.Array]) {
+        return @($Value)
+    }
+
+    if ($Value -is [System.Collections.IEnumerable]) {
+        $items = New-Object System.Collections.Generic.List[object]
+        foreach ($item in $Value) {
+            $items.Add($item) | Out-Null
+        }
+
+        if ($items.Count -eq 0) {
+            return @()
+        }
+
+        return $items.ToArray()
+    }
+
     return @($Value)
 }
 
@@ -119,6 +149,7 @@ function Get-ScriptDirectory {
 }
 
 $Script:ScriptRoot = Get-ScriptDirectory -InvocationPath $MyInvocation.MyCommand.Path
+$Script:LocalModulesPath = Join-Path $Script:ScriptRoot 'Modules'
 
 if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
     $ConfigPath = Join-Path $Script:ScriptRoot 'sharepoint-horilla.config.json'
@@ -126,13 +157,29 @@ if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
 
 Set-Location -LiteralPath $Script:ScriptRoot
 
+function Initialize-LocalModulePath {
+    if (-not (Test-Path -LiteralPath $Script:LocalModulesPath)) {
+        New-Item -ItemType Directory -Path $Script:LocalModulesPath -Force | Out-Null
+    }
+
+    $moduleRoots = @($Script:LocalModulesPath) + @(
+        $env:PSModulePath -split ';' | Where-Object {
+            -not [string]::IsNullOrWhiteSpace($_) -and (Test-Path -LiteralPath $_)
+        }
+    ) | Select-Object -Unique
+
+    $env:PSModulePath = ($moduleRoots -join ';')
+}
+
 function Ensure-ImportExcelModule {
+    Initialize-LocalModulePath
+
     if (Get-Module -ListAvailable -Name ImportExcel) {
         Import-Module ImportExcel -ErrorAction Stop
         return
     }
 
-    Write-Host 'ImportExcel module not found. Installing for current user (one-time setup)...'
+    Write-Host 'ImportExcel module not found. Downloading to local Modules folder (one-time setup)...'
 
     try {
         if (-not (Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue)) {
@@ -144,7 +191,7 @@ function Ensure-ImportExcelModule {
             Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
         }
 
-        Install-Module ImportExcel -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        Save-Module ImportExcel -Path $Script:LocalModulesPath -Force -ErrorAction Stop
         Import-Module ImportExcel -ErrorAction Stop
         Write-Host 'ImportExcel installed successfully.'
     }
@@ -157,7 +204,7 @@ Run these commands manually in PowerShell, then try again:
     Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
     Install-PackageProvider -Name NuGet -Force
     Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-    Install-Module ImportExcel -Scope CurrentUser -Force
+    Save-Module ImportExcel -Path "$Script:LocalModulesPath" -Force
 
 Then run:
 
@@ -476,6 +523,64 @@ function Test-ShouldSkipRow {
     return $false
 }
 
+function Convert-OrderedToPsCustomObject {
+    param(
+        [System.Collections.IDictionary]$OrderedValues
+    )
+
+    $row = New-Object PSObject
+    foreach ($key in $OrderedValues.Keys) {
+        $row | Add-Member -NotePropertyName $key -NotePropertyValue $OrderedValues[$key]
+    }
+
+    return $row
+}
+
+function Get-DefaultHorillaHeaders {
+    return @(
+        'Badge ID'
+        'First Name'
+        'Last Name'
+        'Phone'
+        'Email'
+        'Gender'
+        'Department'
+        'Job Position'
+        'Job Role'
+        'Work Type'
+        'Shift'
+        'Employee Type'
+        'Reporting Manager'
+        'Company'
+        'Location'
+        'Date Joining'
+        'Contract End Date'
+        'Basic Salary'
+        'Salary Hour'
+    )
+}
+
+function Ensure-HorillaTemplate {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (Test-Path -LiteralPath $Path) {
+        return
+    }
+
+    Write-Host "Horilla template not found. Creating default template at: $Path"
+
+    $headers = Get-DefaultHorillaHeaders
+    $orderedTemplate = [ordered]@{}
+    foreach ($header in $headers) {
+        $orderedTemplate[$header] = ''
+    }
+    $templateRow = Convert-OrderedToPsCustomObject -OrderedValues $orderedTemplate
+    @($templateRow) | Export-Excel -Path $Path -WorksheetName 'Sheet1' -BoldTopRow -ClearSheet -AutoSize
+}
+
 function Get-HorillaHeaders {
     param(
         [string]$Path
@@ -501,7 +606,16 @@ function Get-HorillaHeaders {
             throw "No headers found in Horilla template: $Path"
         }
 
-        return ,$headers
+        if ($headers -contains 'Count' -and $headers -contains 'Keys') {
+            throw @"
+Horilla template '$Path' looks invalid (hashtable metadata instead of column headers).
+
+Download a fresh template from Horilla (Employee -> Actions -> Import), save it as work_info_template.xlsx,
+or delete the file and run the script again to generate a default header row.
+"@
+        }
+
+        return $headers
     }
     finally {
         Close-ExcelPackage $package -NoSave
@@ -577,7 +691,7 @@ function Convert-SharePointRowToHorilla {
         }
     }
 
-    return [pscustomobject]$orderedRow
+    return Convert-OrderedToPsCustomObject -OrderedValues $orderedRow
 }
 
 function Export-HorillaWorkbook {
@@ -641,10 +755,11 @@ $resolvedPaths = Resolve-DefaultPaths `
     -OutputPath $OutputPath
 
 $sharePointPath = Resolve-InputPath -Path $resolvedPaths.SharePointExportPath -Label 'SharePoint export'
+Ensure-HorillaTemplate -Path $resolvedPaths.TemplatePath
 $templatePath = Resolve-InputPath -Path $resolvedPaths.TemplatePath -Label 'Horilla template'
 $OutputPath = $resolvedPaths.OutputPath
 $config = Get-Config -Path $ConfigPath
-$horillaHeaders = @(Get-HorillaHeaders -Path $templatePath)
+$horillaHeaders = [string[]](Get-HorillaHeaders -Path $templatePath)
 
 if ([string]::IsNullOrWhiteSpace($WorksheetName)) {
     $sheetInfo = ConvertTo-ObjectArray (Get-ExcelSheetInfo -Path $sharePointPath)
