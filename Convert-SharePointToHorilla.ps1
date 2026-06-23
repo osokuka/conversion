@@ -50,6 +50,32 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-ObjectCount {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return 0
+    }
+
+    return @($Value).Count
+}
+
+function Test-HasItems {
+    param($Value)
+
+    return (Get-ObjectCount $Value) -gt 0
+}
+
+function ConvertTo-ObjectArray {
+    param($Value)
+
+    if ($null -eq $Value) {
+        return @()
+    }
+
+    return @($Value)
+}
+
 function Get-ScriptDirectory {
     param(
         [string]$InvocationPath
@@ -303,23 +329,23 @@ function Split-FullName {
 
     $fullName = (ConvertTo-PlainText $FullName)
     if ([string]::IsNullOrWhiteSpace($fullName)) {
-        return @{
+        return [pscustomobject]@{
             FirstName = ''
             LastName  = ''
         }
     }
 
-    $parts = $fullName -split '\s+'
-    if ($parts.Count -eq 1) {
-        return @{
+    $parts = @($fullName -split '\s+', 0, 'RemoveEmptyEntries')
+    if ((Get-ObjectCount $parts) -eq 1) {
+        return [pscustomobject]@{
             FirstName = $parts[0]
             LastName  = ''
         }
     }
 
-    return @{
+    return [pscustomobject]@{
         FirstName = $parts[0]
-        LastName  = ($parts[1..($parts.Count - 1)] -join ' ')
+        LastName  = ($parts[1..((Get-ObjectCount $parts) - 1)] -join ' ')
     }
 }
 
@@ -341,7 +367,7 @@ function Get-FullNameFromRow {
 
 function Resolve-MappedValue {
     param(
-        [hashtable]$Map,
+        $Map,
         [string]$Value
     )
 
@@ -418,7 +444,7 @@ function Test-ShouldSkipRow {
 
     if ($FilterConfig.SkipInactive) {
         $status = ConvertTo-PlainText (Get-RowValue -Row $Row -ColumnName 'Statusi')
-        foreach ($inactiveValue in $FilterConfig.InactiveStatusValues) {
+        foreach ($inactiveValue in (ConvertTo-ObjectArray $FilterConfig.InactiveStatusValues)) {
             if ($status -eq $inactiveValue) {
                 return $true
             }
@@ -449,7 +475,7 @@ function Get-HorillaHeaders {
             $column++
         }
 
-        if ($headers.Count -eq 0) {
+        if ((Get-ObjectCount $headers) -eq 0) {
             throw "No headers found in Horilla template: $Path"
         }
 
@@ -469,7 +495,7 @@ function Convert-SharePointRowToHorilla {
 
     $defaults = $Config.defaults
     $columnMap = $Config.columnMap
-    $fullName = Get-FullNameFromRow -Row $Row -NameSourceColumns @($Config.nameSourceColumns)
+    $fullName = Get-FullNameFromRow -Row $Row -NameSourceColumns (ConvertTo-ObjectArray $Config.nameSourceColumns)
     $nameParts = Split-FullName -FullName $fullName
 
     $badgeId = ConvertTo-PlainText (Get-RowValue -Row $Row -ColumnName $columnMap.'Badge ID')
@@ -551,11 +577,12 @@ function Export-HorillaWorkbook {
 
     Copy-Item -LiteralPath $TemplatePath -Destination $OutputPath -Force
 
-    if ($Rows.Count -eq 0) {
+    $rowItems = ConvertTo-ObjectArray $Rows
+    if ((Get-ObjectCount $rowItems) -eq 0) {
         return
     }
 
-    $exportRows = foreach ($row in $Rows) {
+    $exportRows = foreach ($row in $rowItems) {
         $line = [ordered]@{}
         foreach ($header in $HorillaHeaders) {
             $line[$header] = $row.$header
@@ -580,16 +607,16 @@ $config = Get-Config -Path $ConfigPath
 $horillaHeaders = Get-HorillaHeaders -Path $templatePath
 
 if ([string]::IsNullOrWhiteSpace($WorksheetName)) {
-    $sheetInfo = Get-ExcelSheetInfo -Path $sharePointPath
-    if (-not $sheetInfo -or $sheetInfo.Count -eq 0) {
+    $sheetInfo = ConvertTo-ObjectArray (Get-ExcelSheetInfo -Path $sharePointPath)
+    if (-not (Test-HasItems $sheetInfo)) {
         throw "No worksheets found in SharePoint export: $sharePointPath"
     }
     $WorksheetName = $sheetInfo[0].Name
     Write-Verbose "Using SharePoint worksheet: $WorksheetName"
 }
 
-$importedRows = Import-Excel -Path $sharePointPath -WorksheetName $WorksheetName
-if (-not $importedRows) {
+$importedRows = ConvertTo-ObjectArray (Import-Excel -Path $sharePointPath -WorksheetName $WorksheetName)
+if (-not (Test-HasItems $importedRows)) {
     throw "No rows found in SharePoint worksheet '$WorksheetName'."
 }
 
@@ -618,12 +645,12 @@ foreach ($importedRow in $importedRows) {
   $convertedRows.Add($converted) | Out-Null
 }
 
-Export-HorillaWorkbook -TemplatePath $templatePath -OutputPath $OutputPath -Rows $convertedRows -HorillaHeaders $horillaHeaders
+Export-HorillaWorkbook -TemplatePath $templatePath -OutputPath $OutputPath -Rows @($convertedRows.ToArray()) -HorillaHeaders $horillaHeaders
 
 Write-Host "Conversion complete."
 Write-Host "  SharePoint file      : $sharePointPath"
 Write-Host "  SharePoint worksheet : $WorksheetName"
-Write-Host "  Rows converted       : $($convertedRows.Count)"
+Write-Host "  Rows converted       : $(Get-ObjectCount $convertedRows)"
 Write-Host "  Rows skipped         : $skippedCount"
 Write-Host "  Placeholder emails   : $placeholderEmailCount"
 Write-Host "  Output file          : $OutputPath"
