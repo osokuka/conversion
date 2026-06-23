@@ -42,13 +42,39 @@ param(
 
     [string]$OutputPath,
 
-    [string]$ConfigPath = (Join-Path $PSScriptRoot 'sharepoint-horilla.config.json'),
+    [string]$ConfigPath,
 
     [string]$WorksheetName
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+function Get-ScriptDirectory {
+    param(
+        [string]$InvocationPath
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
+        return $PSScriptRoot
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        return (Split-Path -Parent $PSCommandPath)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($InvocationPath)) {
+        return (Split-Path -Parent $InvocationPath)
+    }
+
+    return (Get-Location).Path
+}
+
+$Script:ScriptRoot = Get-ScriptDirectory -InvocationPath $MyInvocation.MyCommand.Path
+
+if ([string]::IsNullOrWhiteSpace($ConfigPath)) {
+    $ConfigPath = Join-Path $Script:ScriptRoot 'sharepoint-horilla.config.json'
+}
 
 function Ensure-ImportExcelModule {
     if (-not (Get-Module -ListAvailable -Name ImportExcel)) {
@@ -86,7 +112,7 @@ function Find-NamedFile {
     )
 
     $searchRoots = @(
-        $PSScriptRoot
+        $Script:ScriptRoot
         (Get-Location).Path
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique
 
@@ -129,8 +155,8 @@ function Resolve-DefaultPaths {
     }
 
     if ([string]::IsNullOrWhiteSpace($OutputPath)) {
-        $basePath = if (-not [string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-            $PSScriptRoot
+        $basePath = if (-not [string]::IsNullOrWhiteSpace($Script:ScriptRoot)) {
+            $Script:ScriptRoot
         }
         else {
             Split-Path -Parent $SharePointExportPath
