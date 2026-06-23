@@ -29,15 +29,11 @@
   },
   "nameSourceColumns": ["Title", "EEmri"],
   "genderMap": {
-    "Mashkull": "male",
-    "M": "male",
-    "Male": "male",
-    "male": "male",
-    "Femër": "female",
-    "Femer": "female",
-    "F": "female",
-    "Female": "female",
-    "female": "female"
+    "Mashkull": "Male",
+    "M": "Male",
+    "Femër": "Female",
+    "Femer": "Female",
+    "F": "Female"
   },
   "workTypeMap": {
     "Primar": "Full-time",

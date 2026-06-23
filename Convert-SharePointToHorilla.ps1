@@ -359,7 +359,22 @@ function Resolve-MappedValue {
     return $text
 }
 
-function New-PlaceholderEmail {
+function Normalize-HorillaGender {
+    param([string]$Value)
+
+    $text = ConvertTo-PlainText $Value
+    if ([string]::IsNullOrWhiteSpace($text)) {
+        return ''
+    }
+
+    switch ($text.ToLowerInvariant()) {
+        'male' { return 'Male' }
+        'female' { return 'Female' }
+        'm' { return 'Male' }
+        'f' { return 'Female' }
+        default { return $text }
+    }
+}
     param(
         [string]$BadgeId,
         [string]$FirstName,
@@ -466,7 +481,7 @@ function Convert-SharePointRowToHorilla {
     }
 
     $rawGender = Get-RowValue -Row $Row -ColumnName $columnMap.Gender
-    $gender = Resolve-MappedValue -Map $Config.genderMap -Value $rawGender
+    $gender = Normalize-HorillaGender -Value (Resolve-MappedValue -Map $Config.genderMap -Value $rawGender)
 
     $rawWorkType = Get-RowValue -Row $Row -ColumnName $columnMap.'Work Type'
     $workType = Resolve-MappedValue -Map $Config.workTypeMap -Value $rawWorkType
