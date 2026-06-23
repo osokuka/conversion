@@ -335,7 +335,7 @@ function Split-FullName {
         }
     }
 
-    $parts = @($fullName -split '\s+', 0, 'RemoveEmptyEntries')
+    $parts = @(($fullName.Trim() -split '\s+') | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     if ((Get-ObjectCount $parts) -eq 1) {
         return [pscustomobject]@{
             FirstName = $parts[0]
