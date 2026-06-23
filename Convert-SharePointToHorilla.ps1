@@ -57,7 +57,29 @@ function Get-ObjectCount {
         return 0
     }
 
+    if ($Value -is [System.Collections.ICollection]) {
+        return $Value.Count
+    }
+
     return @($Value).Count
+}
+
+function Get-ObjectPropertyValue {
+    param(
+        $Object,
+        [string]$PropertyName
+    )
+
+    if ($null -eq $Object -or [string]::IsNullOrWhiteSpace($PropertyName)) {
+        return ''
+    }
+
+    $property = $Object.PSObject.Properties[$PropertyName]
+    if ($null -eq $property) {
+        return ''
+    }
+
+    return ConvertTo-PlainText $property.Value
 }
 
 function Test-HasItems {
@@ -565,7 +587,7 @@ function Export-HorillaWorkbook {
         [Parameter(Mandatory = $true)]
         [string]$OutputPath,
         [Parameter(Mandatory = $true)]
-        [object[]]$Rows,
+        $Rows,
         [Parameter(Mandatory = $true)]
         [string[]]$HorillaHeaders
     )
@@ -582,15 +604,33 @@ function Export-HorillaWorkbook {
         return
     }
 
-    $exportRows = foreach ($row in $rowItems) {
-        $line = [ordered]@{}
-        foreach ($header in $HorillaHeaders) {
-            $line[$header] = $row.$header
+    $package = Open-ExcelPackage -Path $OutputPath
+    try {
+        $worksheet = $package.Workbook.Worksheets['Sheet1']
+        if ($null -eq $worksheet) {
+            $worksheet = $package.Workbook.Worksheets[1]
         }
-        [pscustomobject]$line
-    }
 
-    $exportRows | Export-Excel -Path $OutputPath -WorksheetName 'Sheet1' -StartRow 2 -ClearSheet:$false -AutoSize
+        if ($null -eq $worksheet) {
+            throw "Worksheet 'Sheet1' not found in Horilla template."
+        }
+
+        $rowIndex = 2
+        foreach ($row in $rowItems) {
+            $columnIndex = 1
+            foreach ($header in $HorillaHeaders) {
+                $worksheet.Cells[$rowIndex, $columnIndex].Value = Get-ObjectPropertyValue -Object $row -PropertyName $header
+                $columnIndex++
+            }
+            $rowIndex++
+        }
+
+        Close-ExcelPackage $package
+    }
+    catch {
+        Close-ExcelPackage $package -NoSave
+        throw
+    }
 }
 
 Ensure-ImportExcelModule
@@ -604,7 +644,7 @@ $sharePointPath = Resolve-InputPath -Path $resolvedPaths.SharePointExportPath -L
 $templatePath = Resolve-InputPath -Path $resolvedPaths.TemplatePath -Label 'Horilla template'
 $OutputPath = $resolvedPaths.OutputPath
 $config = Get-Config -Path $ConfigPath
-$horillaHeaders = Get-HorillaHeaders -Path $templatePath
+$horillaHeaders = @(Get-HorillaHeaders -Path $templatePath)
 
 if ([string]::IsNullOrWhiteSpace($WorksheetName)) {
     $sheetInfo = ConvertTo-ObjectArray (Get-ExcelSheetInfo -Path $sharePointPath)
@@ -645,12 +685,12 @@ foreach ($importedRow in $importedRows) {
   $convertedRows.Add($converted) | Out-Null
 }
 
-Export-HorillaWorkbook -TemplatePath $templatePath -OutputPath $OutputPath -Rows @($convertedRows.ToArray()) -HorillaHeaders $horillaHeaders
+Export-HorillaWorkbook -TemplatePath $templatePath -OutputPath $OutputPath -Rows $convertedRows -HorillaHeaders $horillaHeaders
 
-Write-Host "Conversion complete."
+Write-Host 'Conversion complete.'
 Write-Host "  SharePoint file      : $sharePointPath"
 Write-Host "  SharePoint worksheet : $WorksheetName"
-Write-Host "  Rows converted       : $(Get-ObjectCount $convertedRows)"
+Write-Host "  Rows converted       : $($convertedRows.Count)"
 Write-Host "  Rows skipped         : $skippedCount"
 Write-Host "  Placeholder emails   : $placeholderEmailCount"
 Write-Host "  Output file          : $OutputPath"
