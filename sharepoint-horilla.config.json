@@ -1,0 +1,58 @@
+{
+  "defaults": {
+    "Company": "Caritas Kosovo",
+    "Shift": "",
+    "WorkType": "Full-time",
+    "EmployeeType": "Permanent",
+    "ReportingManager": "",
+    "PlaceholderEmailDomain": "caritaskosova.org",
+    "DateFormat": "yyyy-MM-dd"
+  },
+  "filters": {
+    "SkipInactive": true,
+    "InactiveStatusValues": ["Inactive", "Jo aktiv", "Terminated", "Pension"]
+  },
+  "columnMap": {
+    "Badge ID": "Nr personal",
+    "Email": "E-mail",
+    "Phone": "Nr. Telefonit",
+    "Gender": "Gjinia",
+    "Department": "Projekti",
+    "Job Position": "Pozita e punës",
+    "Job Role": "Kualifikimi",
+    "Work Type": "Lloji i punësimit",
+    "Location": "Vendi i Punës",
+    "Date Joining": "Data e fillimit të punës",
+    "Basic Salary": "Paga Bruto",
+    "Salary Hour": null,
+    "Contract End Date": "Data e përfundimit të kontratës"
+  },
+  "nameSourceColumns": ["Title", "EEmri"],
+  "genderMap": {
+    "Mashkull": "male",
+    "M": "male",
+    "Male": "male",
+    "male": "male",
+    "Femër": "female",
+    "Femer": "female",
+    "F": "female",
+    "Female": "female",
+    "female": "female"
+  },
+  "workTypeMap": {
+    "Primar": "Full-time",
+    "Sekondar": "Part-time",
+    "Me kohe te plote": "Full-time",
+    "Me kohe te pjesshme": "Part-time",
+    "Kontrate": "Contract",
+    "Contract": "Contract"
+  },
+  "employeeTypeMap": {
+    "Primar": "Permanent",
+    "Sekondar": "Temporary",
+    "Kontrate": "Contract",
+    "Contract": "Contract",
+    "Permanent": "Permanent",
+    "Temporary": "Temporary"
+  }
+}
